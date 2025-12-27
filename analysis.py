@@ -37,6 +37,108 @@ R_EQ_TO_GAL = np.array([
     [-0.8676661490, -0.1980763734,  0.4559837762]
 ], dtype=float)
 
+# --- Robust CSV readers (NEW) -------------------------------------------------
+
+def read_ra_dec_csv_robust(path: str):
+    """
+    Robust CSV reader for columns 'ra_rad' and 'dec_rad'.
+
+    Handles:
+      - Windows newline oddities (open with newline="")
+      - UTF-8 BOM (utf-8-sig)
+      - comma/semicolon/tab delimiter (auto-sniff)
+      - empty lines (skipped)
+      - whitespace around headers/values
+    """
+    ra_vals, dec_vals = [], []
+
+    # newline="" is critical for csv module correctness across platforms.
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        # Peek a sample for dialect sniffing (delimiter, etc.)
+        sample = f.read(8192)
+        f.seek(0)
+
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
+        except csv.Error:
+            dialect = csv.excel  # fallback
+            dialect.delimiter = ","
+
+        reader = csv.DictReader(f, dialect=dialect, skipinitialspace=True)
+
+        if reader.fieldnames is None:
+            raise ValueError(f"{path}: CSV has no header row.")
+
+        # Normalize header names (strip whitespace)
+        field_map = {name.strip(): name for name in reader.fieldnames}
+        if "ra_rad" not in field_map or "dec_rad" not in field_map:
+            raise ValueError(
+                f"{path}: expected columns 'ra_rad' and 'dec_rad', got {list(field_map.keys())}"
+            )
+
+        ra_key = field_map["ra_rad"]
+        dec_key = field_map["dec_rad"]
+
+        for row in reader:
+            # Skip truly empty rows (often produced by weird newline handling)
+            if not row or all((v is None or str(v).strip() == "") for v in row.values()):
+                continue
+
+            try:
+                ra_vals.append(float(str(row[ra_key]).strip()))
+                dec_vals.append(float(str(row[dec_key]).strip()))
+            except (KeyError, TypeError, ValueError) as e:
+                raise ValueError(f"{path}: bad row {row}") from e
+
+    return np.array(ra_vals, dtype=float), np.array(dec_vals, dtype=float)
+
+
+def read_two_col_csv_int_float(path: str, key_int: str, key_float: str):
+    """
+    Robustly reads a 2-column CSV with header. Returns dict[int] -> float.
+
+    Handles:
+      - Windows newline oddities (newline="")
+      - UTF-8 BOM (utf-8-sig)
+      - delimiter sniffing
+      - empty rows
+      - whitespace around headers/values
+    """
+    out = {}
+
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        sample = f.read(8192)
+        f.seek(0)
+
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
+        except csv.Error:
+            dialect = csv.excel
+            dialect.delimiter = ","
+
+        reader = csv.DictReader(f, dialect=dialect, skipinitialspace=True)
+        if reader.fieldnames is None:
+            raise ValueError(f"{path}: CSV has no header row.")
+
+        field_map = {name.strip(): name for name in reader.fieldnames}
+        if key_int not in field_map or key_float not in field_map:
+            raise ValueError(
+                f"{path}: expected columns '{key_int}' and '{key_float}', got {list(field_map.keys())}"
+            )
+
+        k_int = field_map[key_int]
+        k_float = field_map[key_float]
+
+        for row in reader:
+            if not row or all((v is None or str(v).strip() == "") for v in row.values()):
+                continue
+            try:
+                out[int(str(row[k_int]).strip())] = float(str(row[k_float]).strip())
+            except (KeyError, TypeError, ValueError) as e:
+                raise ValueError(f"{path}: bad row {row}") from e
+
+    return out
+
 # --- Utility helpers (new) ----------------------------------------------------
 
 def _uniform01_from_hash(*values):
@@ -65,28 +167,23 @@ def modular_delta_deg(a_deg, b_deg):
 # --- Systematics --------------------------------------------------------------
 
 def get_systematics(seed, offsets_file, calibration_file):
-    systematics={}
-    # Read offsets
-    offsets = {}
-    with open(offsets_file, 'r', encoding='utf-8') as f:
-        lines = f.read().strip().splitlines()
-        for line in lines[1:]:
-            du_id_str, offset_str = line.split(',')
-            offsets[int(du_id_str)] = float(offset_str)
-    # Read calibration
-    calibration = {}
-    with open(calibration_file, 'r', encoding='utf-8') as f:
-        lines = f.read().strip().splitlines()
-        for line in lines[1:]:
-            du_id_str, calib_str = line.split(',')
-            calibration[int(du_id_str)] = float(calib_str)
+    systematics = {}
+
+    # Robust read offsets + calibration (avoids Windows newline/bom issues too)
+    offsets = read_two_col_csv_int_float(offsets_file, key_int="du_id", key_float="offset")
+    calibration = read_two_col_csv_int_float(calibration_file, key_int="du_id", key_float="calibration")
+
     # Compute miscalibration magnitude
-    systematics['miscal'] = sum(abs(offsets[du]+calibration[du]) for du in calibration.keys())
-    systematics['avgcal'] = systematics['miscal']/len(offsets) # ns/DU
+    systematics['miscal'] = sum(abs(offsets[du] + calibration[du]) for du in calibration.keys())
+    systematics['avgcal'] = systematics['miscal'] / len(offsets)  # ns/DU
+
     # Map miscalibration -> radius (deg anchors)
     x_anchor = np.array([0.0, 0.1, 0.2, 0.5, 0.7, 1.0, 3.0, 4.0, 5.0, 20.0])    # ns/DU
     y_anchor = np.array([0.0, 0.05, 0.2, 0.3, 0.4, 0.5, 1.0, 3.0, 10.0, 180.0]) # degrees
-    systematics['radius'] = math.radians(np.interp(min(20.0,systematics['avgcal']), x_anchor, y_anchor)) # rad
+    systematics['radius'] = math.radians(
+        np.interp(min(20.0, systematics['avgcal']), x_anchor, y_anchor)
+    )  # rad
+
     # Deterministic seed derived from calibration + global seed
     systematics['seed'] = seed + int(hashlib.sha256(str(calibration).encode('utf-8')).hexdigest(), 16) % (2**32)
     return systematics
@@ -647,16 +744,9 @@ def run_analysis(infile: str,
     """
 
     print(f"Reading CSV input: {infile}")
-    ra_vals, dec_vals = [], []
 
-    with open(infile, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            ra_vals.append(float(row["ra_rad"]))
-            dec_vals.append(float(row["dec_rad"]))
-
-    ra_vals = np.array(ra_vals)
-    dec_vals = np.array(dec_vals)
+    # --- NEW: robust CSV input read (fixes Windows blank-line/newline/BOM issues) ---
+    ra_vals, dec_vals = read_ra_dec_csv_robust(infile)
 
     az_list = []
     zen_list = []
