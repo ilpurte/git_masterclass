@@ -170,8 +170,8 @@ def get_systematics(seed, offsets_file, calibration_file):
     systematics = {}
 
     # Robust read offsets + calibration (avoids Windows newline/bom issues too)
-    offsets = read_two_col_csv_int_float(offsets_file, key_int="du_id", key_float="offset")
-    calibration = read_two_col_csv_int_float(calibration_file, key_int="du_id", key_float="calibration")
+    offsets = read_two_col_csv_int_float(offsets_file, key_int="du_id", key_float="offset_ns")
+    calibration = read_two_col_csv_int_float(calibration_file, key_int="du_id", key_float="calib_ns")
 
     # Compute miscalibration magnitude
     systematics['miscal'] = sum(abs(offsets[du] + calibration[du]) for du in calibration.keys())
