@@ -54,14 +54,13 @@ def read_ra_dec_csv_robust(path: str):
 
     # newline="" is critical for csv module correctness across platforms.
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        # Peek a sample for dialect sniffing (delimiter, etc.)
         sample = f.read(8192)
         f.seek(0)
 
         try:
             dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
         except csv.Error:
-            dialect = csv.excel  # fallback
+            dialect = csv.excel
             dialect.delimiter = ","
 
         reader = csv.DictReader(f, dialect=dialect, skipinitialspace=True)
@@ -69,7 +68,6 @@ def read_ra_dec_csv_robust(path: str):
         if reader.fieldnames is None:
             raise ValueError(f"{path}: CSV has no header row.")
 
-        # Normalize header names (strip whitespace)
         field_map = {name.strip(): name for name in reader.fieldnames}
         if "ra_rad" not in field_map or "dec_rad" not in field_map:
             raise ValueError(
@@ -80,7 +78,6 @@ def read_ra_dec_csv_robust(path: str):
         dec_key = field_map["dec_rad"]
 
         for row in reader:
-            # Skip truly empty rows (often produced by weird newline handling)
             if not row or all((v is None or str(v).strip() == "") for v in row.values()):
                 continue
 
@@ -147,7 +144,6 @@ def _uniform01_from_hash(*values):
     """
     h = hashlib.sha256("|".join(f"{v:.16e}" if isinstance(v, float) else str(v)
                                 for v in values).encode("utf-8")).digest()
-    # Use first 8 bytes -> 64-bit int -> divide by 2**64
     u64 = int.from_bytes(h[:8], "big", signed=False)
     return (u64 / 2**64)
 
@@ -155,7 +151,6 @@ def _rng_from_seed(seed_int):
     """
     Deterministic NumPy Generator from a 64-bit seed.
     """
-    # Collapse large ints to 64-bit consistently
     return np.random.default_rng(seed_int & ((1 << 64) - 1))
 
 def modular_delta_deg(a_deg, b_deg):
@@ -169,33 +164,26 @@ def modular_delta_deg(a_deg, b_deg):
 def get_systematics(seed, offsets_file, calibration_file):
     systematics = {}
 
-    # Robust read offsets + calibration (avoids Windows newline/bom issues too)
     offsets = read_two_col_csv_int_float(offsets_file, key_int="du_id", key_float="offset_ns")
     calibration = read_two_col_csv_int_float(calibration_file, key_int="du_id", key_float="calib_ns")
 
-    # Compute miscalibration magnitude
     systematics['miscal'] = sum(abs(offsets[du] + calibration[du]) for du in calibration.keys())
-    systematics['avgcal'] = systematics['miscal'] / len(offsets)  # ns/DU
+    systematics['avgcal'] = systematics['miscal'] / len(offsets)
 
-    # Map miscalibration -> radius (deg anchors)
-    x_anchor = np.array([0.0, 0.1, 0.2, 0.5, 0.7, 1.0, 3.0, 4.0, 5.0, 20.0])    # ns/DU
-    y_anchor = np.array([0.0, 0.05, 0.2, 0.3, 0.4, 0.5, 1.0, 3.0, 10.0, 180.0]) # degrees
+    x_anchor = np.array([0.0, 0.1, 0.2, 0.5, 0.7, 1.0, 3.0, 4.0, 5.0, 20.0])
+    y_anchor = np.array([0.0, 0.05, 0.2, 0.3, 0.4, 0.5, 1.0, 3.0, 10.0, 180.0])
     systematics['radius'] = math.radians(
         np.interp(min(20.0, systematics['avgcal']), x_anchor, y_anchor)
-    )  # rad
+    )
 
-    # Deterministic seed derived from calibration + global seed
     systematics['seed'] = seed + int(hashlib.sha256(str(calibration).encode('utf-8')).hexdigest(), 16) % (2**32)
     return systematics
 
-# All angles in radians
 def apply_systematics(radius, calseed, day_fraction):
     """
     Deterministic variation around radius (±10%) and a rotation phase.
     Now fully deterministic given (radius,calseed,day_fraction).
     """
-    # Use Python's RNG but seeded deterministically for this (calseed, day_fraction) combo
-    # day_fraction will be deterministic (see scramble_point)
     local_seed = int((calseed ^ int(day_fraction * 1e12)) & 0xFFFFFFFF)
     rng = random.Random(local_seed)
     alpha_scale = max(0.1, min(10.0, rng.gauss(1.0, 0.10)))
@@ -205,8 +193,7 @@ def apply_systematics(radius, calseed, day_fraction):
 
 def deterministic_day_fraction(ra, dec, calseed):
     """
-    NEW: Deterministic 'pseudo-time' in [0,1), derived from (ra, dec, calseed).
-    Fixes reproducibility hole.
+    Deterministic 'pseudo-time' in [0,1), derived from (ra, dec, calseed).
     """
     return _uniform01_from_hash(calseed, ra, dec)
 
@@ -214,13 +201,9 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
     """
     Deterministically move an event according to systematics.
     """
-    # NEW: deterministic pseudo-time from (ra, dec, calseed)
     day_fraction = deterministic_day_fraction(ra, dec, calseed)
-
-    # get alpha (angular displacement) and phase (direction on tangent plane)
     alpha, phi = apply_systematics(radius, calseed, day_fraction)
 
-    # original unit vector
     sin_dec = math.sin(dec)
     cos_dec = math.cos(dec)
     x0 = cos_dec * math.cos(ra)
@@ -228,7 +211,6 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
     z0 = sin_dec
     v0 = np.array([x0, y0, z0])
 
-    # orthonormal tangent basis at v0
     e_theta = np.array([-sin_dec * math.cos(ra),
                         -sin_dec * math.sin(ra),
                          cos_dec])
@@ -260,7 +242,7 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
 def gaussian_smear_tangent(ra, dec, sigma_rad, rng=None):
     """
     Gaussian on tangent plane (small-angle) around (ra, dec).
-    NEW: accepts a deterministic NumPy Generator 'rng'; falls back to global RNG if None.
+    Accepts a deterministic NumPy Generator 'rng'; falls back to global RNG if None.
     """
     x = math.cos(dec) * math.cos(ra)
     y = math.cos(dec) * math.sin(ra)
@@ -316,8 +298,8 @@ def equatorial_to_galactic_angles(ra_eq, dec_eq):
     v_gal = R_EQ_TO_GAL @ np.array([x, y, z])
     v_gal /= np.linalg.norm(v_gal)
 
-    lon_gal = math.atan2(v_gal[1], v_gal[0])  # galactic longitude (−π, π]
-    lat_gal = math.asin(np.clip(v_gal[2], -1, 1))  # galactic latitude
+    lon_gal = math.atan2(v_gal[1], v_gal[0])
+    lat_gal = math.asin(np.clip(v_gal[2], -1, 1))
     return lon_gal, lat_gal
 
 def local_to_galactic(az, zen):
@@ -337,12 +319,6 @@ def angular_separation_deg(ra1_deg, dec1_deg, ra2_deg, dec2_deg):
     return 2.0 * math.degrees(math.asin(math.sqrt(a)))
 
 def maximize_extended_likelihood_fixed_background(S_vals, B_val, n_b_fixed, N_events):
-    """
-    Extended likelihood with background count fixed to n_b_fixed:
-      logL(n_s) = sum_i log( n_s * S_i + n_b_fixed * B_val ) - (n_s + n_b_fixed)
-    We maximize over 0 <= n_s <= N_events.
-    Returns: n_s_hat, logL_hat, logL_null
-    """
     if N_events == 0:
         return 0.0, 0.0, 0.0
 
@@ -447,16 +423,8 @@ def signal_events_generator(ra, dec, smearing_angle, n_events=1, degrees=True):
     return ra_new, dec_new
 
 def poisson_significance(events_df_local: pd.DataFrame,
-                         source_az, source_zen, roi_angle, source_name=None):
-    """
-    ON/OFF significance in *local* coordinates (azimuth/zenith), all angles in radians.
-
-    - ON: spherical cap of radius roi_angle around (source_az, source_zen)
-    - OFF: zenith band [source_zen - roi_angle, source_zen + roi_angle] excluding the ON cap
-    - Background expectation in ROI: mu = (Ω_ON / Ω_OFF) * N_OFF
-
-    Returns: (zen_min, zen_max, sigma_onoff)
-    """
+                         source_az, source_zen, roi_angle, source_name=None,
+                         verbose: bool = True):
     theta_min = max(source_zen - roi_angle, 0.0)
     theta_max = min(source_zen + roi_angle, np.pi)
 
@@ -491,10 +459,11 @@ def poisson_significance(events_df_local: pd.DataFrame,
     pvalue = poisson_pvalue(n_ON, mu_bkg)
     sigma  = pvalue_to_sigma(pvalue, one_sided=True) if (0.0 < pvalue < 1.0) else 0.0
 
-    if source_name is None:
-        print(f'[LOCAL ON/OFF] Z = {sigma:.2f}σ ; n_ON={n_ON} ; n_BKG={mu_bkg:.3f} ; p={pvalue:.3e}')
-    else:
-        print(f'[LOCAL ON/OFF] {source_name}: Z = {sigma:.2f}σ ; n_ON={n_ON} ; n_BKG={mu_bkg:.3f} ; p={pvalue:.3e}')
+    if verbose:
+        if source_name is None:
+            print(f'[LOCAL ON/OFF] Z = {sigma:.2f}σ ; n_ON={n_ON} ; n_BKG={mu_bkg:.3f} ; p={pvalue:.3e}')
+        else:
+            print(f'[LOCAL ON/OFF] {source_name}: Z = {sigma:.2f}σ ; n_ON={n_ON} ; n_BKG={mu_bkg:.3f} ; p={pvalue:.3e}')
 
     return float(theta_min), float(theta_max), float(sigma)
 
@@ -502,25 +471,22 @@ def poisson_significance(events_df_local: pd.DataFrame,
 
 def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                          extra_sources=None, extra_smeared=None,
-                         outfile_base="aitoff"):
+                         outfile_base="aitoff",
+                         verbose: bool = True):
 
-    # Local lon/lat for Aitoff (from az/zen)
     lon_local = (az_array + math.pi) % (2*math.pi) - math.pi
     lat_local = np.pi/2 - zen_array
 
-    # Galactic lon/lat (in radians) from gal_coords
     gal_lon = np.array([c[0] for c in gal_coords])
     gal_lat = np.array([c[1] for c in gal_coords])
     gal_lon_deg = np.degrees(gal_lon)
     gal_lat_deg = np.degrees(gal_lat)
 
-    # DataFrame in local coordinates (radians) for ON/OFF method
     events_df_local = pd.DataFrame({
         "az_rad":  az_array.astype(float),
         "zen_rad": zen_array.astype(float)
     })
 
-    # --- Main Aitoff plot (local coordinates) ---
     fig_all, ax_all = plt.subplots(figsize=(10,5), subplot_kw={'projection':'aitoff'})
     ax_all.set_title("Reconstructed events (Aitoff projection, LOCAL az/alt)")
     ax_all.grid(True)
@@ -531,9 +497,8 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     @cursor.connect("add")
     def on_hover(sel):
         i = sel.index
-        # Show BOTH local and galactic to avoid confusion
         az_deg = math.degrees((az_array[i] + 2*math.pi) % (2*math.pi))
-        alt_deg = math.degrees(lat_local[i])  # lat_local is alt in radians
+        alt_deg = math.degrees(lat_local[i])
         sel.annotation.set_text(
             f"Local az={az_deg:.2f}°\nLocal alt={alt_deg:.2f}°\n"
             f"Gal lon={gal_lon_deg[i]:.2f}°\nGal lat={gal_lat_deg[i]:.2f}°"
@@ -549,8 +514,8 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                        alpha=0.9, marker='o', label="Cosmic neutrino")
 
     if extra_sources:
-        src_az = np.array([c[0] for c in extra_sources])   # radians
-        src_zen = np.array([c[1] for c in extra_sources])  # radians
+        src_az = np.array([c[0] for c in extra_sources])
+        src_zen = np.array([c[1] for c in extra_sources])
         src_lon_local = (src_az + math.pi) % (2*math.pi) - math.pi
         src_lat_local = np.pi/2 - src_zen
         ax_all.scatter(src_lon_local, src_lat_local, s=120, color='red', alpha=1.0,
@@ -560,25 +525,21 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     ax_all.legend(loc='upper left', bbox_to_anchor=(-0.05, 1))
     plt.savefig(outfile_base + "_aitoff.png", dpi=300, bbox_inches='tight')
 
-    # --- 2×2 ZOOM PANEL ---
     fig_zoom, axes_zoom = plt.subplots(2, 2, figsize=(18, 12))
     axes_zoom = axes_zoom.flatten()
     plt.subplots_adjust(hspace=0.22)
 
     if extra_sources:
-        # Use galactic lon/lat (deg) in the zoom panels as in previous code
-        ra_all = gal_lon_deg   # these are "galactic lon" in degrees
-        dec_all = gal_lat_deg  # these are "galactic lat" in degrees
+        ra_all = gal_lon_deg
+        dec_all = gal_lat_deg
 
         sigma_deg = 0.1
-        area_box_deg2 = 10.0 * 10.0  # 10x10 deg box area
+        area_box_deg2 = 10.0 * 10.0
         src_names = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
 
-        # parameters for local background estimation inside the 10x10 box
-        r_core_deg = 0.5  # central core radius excluded from background estimate
+        r_core_deg = 0.5
         area_core = math.pi * (r_core_deg ** 2)
 
-        # ROI for ON/OFF (coherent with the large circle in the zoom)
         roi_onoff_deg = 0.3
         roi_onoff_rad = math.radians(roi_onoff_deg)
 
@@ -593,7 +554,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             ra_src_deg = math.degrees(gal_lon_src)
             dec_src_deg = math.degrees(gal_lat_src)
 
-            # --- FIX: robust 10x10 selection with modular RA (galactic lon) ---
             delta_ra = ((ra_all - ra_src_deg + 180.0) % 360.0) - 180.0
             in_box_mask = (np.abs(delta_ra) <= 5.0) & (np.abs(dec_all - dec_src_deg) <= 5.0)
 
@@ -601,7 +561,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             dec_box = dec_all[in_box_mask]
             N_events = len(ra_box)
 
-            # compute per-event angular distances from source for events inside box
             if N_events > 0:
                 dists = np.array([angular_separation_deg(ra_box[j], dec_box[j], ra_src_deg, dec_src_deg)
                                   for j in range(N_events)])
@@ -613,26 +572,21 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             area_box = area_box_deg2
             area_outside_core = max(area_box - area_core, 1e-6)
 
-            # number outside core
             N_outside_core = max(N_events - N_core, 0)
 
-            # estimated local background density (events per deg^2) from outside-core region
             if N_outside_core > 0:
                 background_density = N_outside_core / area_outside_core
             else:
                 background_density = (N_events / area_box) if N_events > 0 else 1e-6
 
-            # expected number of background events inside entire box (used as fixed n_b)
             n_b_expected = background_density * area_box
 
-            # scatter background events (above circles)
             ax.scatter(ra_box, dec_box, s=10, alpha=0.6, color='gray',
                        label="Background", zorder=2)
 
-            # cosmic neutrinos (smeared) above background
             if extra_smeared:
-                ra_sm = np.degrees([c[2] for c in extra_smeared])  # gal lon deg
-                dec_sm = np.degrees([c[3] for c in extra_smeared]) # gal lat deg
+                ra_sm = np.degrees([c[2] for c in extra_smeared])
+                dec_sm = np.degrees([c[3] for c in extra_smeared])
                 delta_sm = ((ra_sm - ra_src_deg + 180.0) % 360.0) - 180.0
                 mask_sm = (np.abs(delta_sm) <= 5.0) & (np.abs(dec_sm - dec_src_deg) <= 5.0)
 
@@ -640,17 +594,14 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                            color='green', alpha=0.9,
                            label="Cosmic neutrino", zorder=3)
 
-            # compute S_i values (signal pdf per deg^2) for events in the box
             if N_events > 0:
                 S_vals = np.zeros(N_events, dtype=float)
                 for j in range(N_events):
                     ang_deg = angular_separation_deg(ra_box[j], dec_box[j], ra_src_deg, dec_src_deg)
-                    # Planar Gaussian approximation in deg; acceptable here.
                     S_vals[j] = (1.0 / (2.0 * math.pi * sigma_deg**2)) * math.exp(-0.5 * (ang_deg / sigma_deg)**2)
             else:
                 S_vals = np.zeros(0, dtype=float)
 
-            # circles below points
             circle_small = Circle((ra_src_deg, dec_src_deg), 0.1,
                                   fill=False, edgecolor='red',
                                   linewidth=1.5, zorder=1)
@@ -663,10 +614,8 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             ax.set_xlim(ra_src_deg - 5, ra_src_deg + 5)
             ax.set_ylim(dec_src_deg - 5, dec_src_deg + 5)
 
-            # --- Extended likelihood (FIXED BACKGROUND) with proper normalization ---
-            # PDF for uniform background over the 10x10 box:
-            B_val = 1.0 / area_box_deg2     # <- FIX: true PDF, integrates to 1 over the box
-            n_b_fixed = n_b_expected        # <- expected background count (density * area)
+            B_val = 1.0 / area_box_deg2
+            n_b_fixed = n_b_expected
 
             n_s_best, logL_best, logL_null = maximize_extended_likelihood_fixed_background(
                 S_vals, B_val, n_b_fixed, N_events)
@@ -674,17 +623,15 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             TS = max(0.0, 2.0 * (logL_best - logL_null))
             significance_ml = math.sqrt(TS) if TS > 0 else 0.0
 
-            # --- ON/OFF significance in LOCAL coordinates (az/zen) ---
-            # Use the local source coordinates already available (src_az[i], src_zen[i])
             _, _, significance_onoff = poisson_significance(
                 events_df_local,
                 source_az=src_az[i],
                 source_zen=src_zen[i],
                 roi_angle=roi_onoff_rad,
-                source_name=src_names[i]
+                source_name=src_names[i],
+                verbose=verbose
             )
 
-            # legend inside bottom-right, translucent, with both significances
             legend = ax.legend(loc="lower right", bbox_to_anchor=(0.98, 0.02),
                                fontsize=10, frameon=True)
             legend.set_title(f"Z_ML = {significance_ml:.2f}σ\nZ_ON/OFF = {significance_onoff:.2f}σ",
@@ -692,7 +639,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             legend.get_frame().set_alpha(0.85)
             legend.get_frame().set_facecolor("white")
 
-            # text box with n_s
             ax.text(
                 0.02, 0.98,
                 f"nₛ = {n_s_best:.1f}",
@@ -702,26 +648,41 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                 bbox=dict(facecolor='white', alpha=0.85, edgecolor='black', linewidth=0.5)
             )
 
-            print(f"{src_names[i]}: N_box={N_events}, n_b_exp={n_b_expected:.2f}, "
-                  f"n_s={n_s_best:.2f}, Z_ML={significance_ml:.3f}σ, Z_ON/OFF={significance_onoff:.3f}σ")
+            if verbose:
+                print(f"{src_names[i]}: N_box={N_events}, n_b_exp={n_b_expected:.2f}, "
+                      f"n_s={n_s_best:.2f}, Z_ML={significance_ml:.3f}σ, Z_ON/OFF={significance_onoff:.3f}σ")
 
     plt.tight_layout()
 
-    # Save zoom panel PNG
     zoom_png = outfile_base + "_zoom.png"
     try:
         fig_zoom.savefig(zoom_png, dpi=300, bbox_inches='tight')
-        print(f"Zoom panel saved: {zoom_png}")
+        if verbose:
+            print(f"Zoom panel saved: {zoom_png}")
     except Exception as e:
-        print(f"Warning: could not save zoom PNG: {e}")
+        if verbose:
+            print(f"Warning: could not save zoom PNG: {e}")
 
     plt.show()
+
+# --- Progress helpers ---------------------------------------------------------
+
+def _safe_call_progress(progress_callback, percent: int):
+    if progress_callback is None:
+        return
+    try:
+        progress_callback(int(percent))
+    except Exception:
+        # Never fail analysis because UI callback failed
+        return
 
 # --- Main API -----------------------------------------------------------------
 
 def run_analysis(infile: str,
                  outfile: str,
-                 calibration_file: str = "config/calibration_nearly_perfect.csv") -> str:
+                 calibration_file: str = "config/calibration_nearly_perfect.csv",
+                 progress_callback=None,
+                 verbose: bool = True) -> str:
     """
     Run the full analysis pipeline.
 
@@ -729,23 +690,25 @@ def run_analysis(infile: str,
     ----------
     infile : str
         Path to the input sky-map CSV (with columns 'ra_rad' and 'dec_rad').
-        This will typically be a file that lives in your repo.
     outfile : str
         Path to the output CSV that will contain the scrambled events.
     calibration_file : str
-        Path to the calibration CSV. This is the ONLY input that we expect
-        the user to provide (e.g. via upload in a web interface). All other
-        files (config.json, offsets.csv, etc.) are taken from the repo.
+        Path to the calibration CSV.
+    progress_callback : callable | None
+        Function that accepts an integer percent (0..100). Used by Voilà UI.
+        Progress reflects the main scrambling loop over the input events.
+    verbose : bool
+        If False, suppresses print() outputs (recommended for Voilà).
 
     Returns
     -------
     str
-        The path to the output CSV (outfile), for convenience.
+        The path to the output CSV (outfile).
     """
 
-    print(f"Reading CSV input: {infile}")
+    if verbose:
+        print(f"Reading CSV input: {infile}")
 
-    # --- NEW: robust CSV input read (fixes Windows blank-line/newline/BOM issues) ---
     ra_vals, dec_vals = read_ra_dec_csv_robust(infile)
 
     az_list = []
@@ -756,7 +719,6 @@ def run_analysis(infile: str,
     writer = csv.writer(out_f)
     writer.writerow(["azimuth", "zenith", "ra_gal", "dec_gal"])
 
-    # Config (hardcoded repo files)
     config_path = "config/config.json"
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -764,18 +726,21 @@ def run_analysis(infile: str,
     seed = int(config.get("global_seed"))
     offsets_file = "config/offsets.csv"
 
-    # HERE we use the calibration_file argument (user-provided path)
     systematics = get_systematics(seed, offsets_file, calibration_file)
-    print(systematics)
+    if verbose:
+        print(systematics)
     radius = systematics["radius"]
     calseed = systematics["seed"]
-    radius_deg = math.degrees(radius)
-    print(f"AVG radius: {radius_deg:.3f}°; CALSEED: {calseed}")
+    if verbose:
+        radius_deg = math.degrees(radius)
+        print(f"AVG radius: {radius_deg:.3f}°; CALSEED: {calseed}")
+        print("Scrambling events...")
 
-    print("Scrambling events...")
+    n_total = int(len(ra_vals))
+    _safe_call_progress(progress_callback, 0)
+    last_percent = -1
 
-    for ra, dec in zip(ra_vals, dec_vals):
-        # Deterministic scramble using systematics-driven alpha/phase
+    for idx, (ra, dec) in enumerate(zip(ra_vals, dec_vals), start=1):
         ra_new, dec_new = scramble_point(ra, dec, radius, calseed, apply_systematics)
         az = ra_new
         zen = math.pi / 2 - dec_new
@@ -786,7 +751,15 @@ def run_analysis(infile: str,
         zen_list.append(zen)
         gal_coords.append((gal_lon, gal_lat))
 
-    # Hardcoded sources (local coords)
+        # progress update (integer percent, throttled)
+        if n_total > 0:
+            percent = int((idx * 100) / n_total)
+            if percent != last_percent:
+                last_percent = percent
+                _safe_call_progress(progress_callback, percent)
+
+    _safe_call_progress(progress_callback, 100)
+
     extra_points_hardcoded = [
         (0.6201256910664598, 1.9847895668488024),
         (1.2495508304639656, 2.3803453248156247),
@@ -798,21 +771,18 @@ def run_analysis(infile: str,
     extra_sources, extra_smeared = [], []
     sigma_rad = math.radians(0.1)
 
-    # Deterministic injection RNGs per (source idx, event idx)
     for i, ((az_hc, zen_hc), n_nu) in enumerate(zip(extra_points_hardcoded, neutrinos_per_source)):
         gal_lon_src, gal_lat_src = local_to_galactic(az_hc, zen_hc)
         writer.writerow([az_hc, zen_hc, gal_lon_src, gal_lat_src])
         extra_sources.append((az_hc, zen_hc, gal_lon_src, gal_lat_src))
 
         for j in range(n_nu):
-            # Deterministic RNG per injected event
             inj_seed = (calseed + (i << 16) + j) & 0xFFFFFFFFFFFFFFFF
             rng = _rng_from_seed(inj_seed)
 
             ra_loc, dec_loc = az_hc, math.pi / 2 - zen_hc
             ra_gauss, dec_gauss = gaussian_smear_tangent(ra_loc, dec_loc, sigma_rad, rng=rng)
 
-            # Apply the same deterministic systematics-based displacement
             ra_final, dec_final = scramble_point(ra_gauss, dec_gauss, radius, calseed, apply_systematics)
             az_final, zen_final = ra_final, math.pi / 2 - dec_final
             gal_lon_ev, gal_lat_ev = local_to_galactic(az_final, zen_final)
@@ -825,21 +795,22 @@ def run_analysis(infile: str,
             gal_coords.append((gal_lon_ev, gal_lat_ev))
 
     out_f.close()
-    print(f"Scrambled CSV written: {outfile}")
+    if verbose:
+        print(f"Scrambled CSV written: {outfile}")
 
     plot_aitoff_and_zoom(
         np.array(az_list), np.array(zen_list), gal_coords,
         extra_sources=extra_sources,
         extra_smeared=extra_smeared,
-        outfile_base=outfile.replace(".csv", "")
+        outfile_base=outfile.replace(".csv", ""),
+        verbose=verbose
     )
 
-    # Return the output CSV path (handy for web interfaces / Binder).
     return outfile
 
 def main():
     """
-    CLI entry point, kept for backwards compatibility.
+    CLI entry point.
 
     Usage:
         python analysis.py input.csv output.csv
@@ -861,7 +832,8 @@ def main():
     else:
         calibration_file = "config/calibration_nearly_perfect.csv"
 
-    run_analysis(infile, outfile, calibration_file)
+    # CLI should remain verbose
+    run_analysis(infile, outfile, calibration_file, progress_callback=None, verbose=True)
 
 if __name__ == "__main__":
     main()
