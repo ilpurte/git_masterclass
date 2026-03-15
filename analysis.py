@@ -235,8 +235,10 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
     x, y, z = new_vec
     new_dec = math.asin(np.clip(z, -1.0, 1.0))
     new_ra  = math.atan2(y, x)
-    if new_ra > math.pi: new_ra -= 2 * math.pi
-    elif new_ra < -math.pi: new_ra += 2 * math.pi
+    if new_ra > math.pi:
+        new_ra -= 2 * math.pi
+    elif new_ra < -math.pi:
+        new_ra += 2 * math.pi
     return new_ra, new_dec
 
 def gaussian_smear_tangent(ra, dec, sigma_rad, rng=None):
@@ -310,11 +312,13 @@ def local_to_galactic(az, zen):
 # --- Likelihood utilities -----------------------------------------------------
 
 def angular_separation_deg(ra1_deg, dec1_deg, ra2_deg, dec2_deg):
-    r1 = math.radians(ra1_deg); d1 = math.radians(dec1_deg)
-    r2 = math.radians(ra2_deg); d2 = math.radians(dec2_deg)
+    r1 = math.radians(ra1_deg)
+    d1 = math.radians(dec1_deg)
+    r2 = math.radians(ra2_deg)
+    d2 = math.radians(dec2_deg)
     sin_d = math.sin((d2 - d1) / 2.0)
     sin_r = math.sin((r2 - r1) / 2.0)
-    a = sin_d**2 + math.cos(d1)*math.cos(d2)*sin_r**2
+    a = sin_d**2 + math.cos(d1) * math.cos(d2) * sin_r**2
     a = max(0.0, min(1.0, a))
     return 2.0 * math.degrees(math.asin(math.sqrt(a)))
 
@@ -402,22 +406,25 @@ def pvalue_to_sigma(pvalue, one_sided=True):
     pvalue = np.asarray(pvalue)
     if np.any((pvalue <= 0) | (pvalue >= 1)):
         raise ValueError("All p-values must be between 0 and 1 (exclusive).")
-    sigma = norm.ppf(1 - pvalue) if one_sided else norm.ppf(1 - pvalue/2)
+    sigma = norm.ppf(1 - pvalue) if one_sided else norm.ppf(1 - pvalue / 2)
     if np.isscalar(pvalue) or np.ndim(pvalue) == 0:
         return float(sigma)
     return sigma
 
 def signal_events_generator(ra, dec, smearing_angle, n_events=1, degrees=True):
     if degrees:
-        ra = np.deg2rad(ra); dec = np.deg2rad(dec); smearing_angle = np.deg2rad(smearing_angle)
-    mean = np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+        ra = np.deg2rad(ra)
+        dec = np.deg2rad(dec)
+        smearing_angle = np.deg2rad(smearing_angle)
+    mean = np.array([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)])
     kappa = 1.0 / smearing_angle**2
     samples = vonmises_fisher(mean, kappa).rvs(n_events)
     x, y, z = samples.T
-    ra_new = np.arctan2(y, x) % (2*np.pi)
+    ra_new = np.arctan2(y, x) % (2 * np.pi)
     dec_new = np.arcsin(z)
     if degrees:
-        ra_new = np.rad2deg(ra_new); dec_new = np.rad2deg(dec_new)
+        ra_new = np.rad2deg(ra_new)
+        dec_new = np.rad2deg(dec_new)
     if n_events == 1:
         return float(ra_new[0]), float(dec_new[0])
     return ra_new, dec_new
@@ -441,14 +448,14 @@ def poisson_significance(events_df_local: pd.DataFrame,
     if df.empty:
         raise ValueError("No events in local zenith band; cannot estimate background.")
 
-    dphi = (df["az_rad"] - source_az + np.pi) % (2*np.pi) - np.pi
+    dphi = (df["az_rad"] - source_az + np.pi) % (2 * np.pi) - np.pi
     cos_g = np.cos(df["zen_rad"]) * np.cos(source_zen) + \
             np.sin(df["zen_rad"]) * np.sin(source_zen) * np.cos(dphi)
     cos_g = np.clip(cos_g, -1.0, 1.0)
     df["angular_distance"] = np.arccos(cos_g)
 
     on_events_df  = df[df["angular_distance"] <= roi_angle]
-    off_events_df = df[df["angular_distance"] >  roi_angle]
+    off_events_df = df[df["angular_distance"] > roi_angle]
     if off_events_df.empty:
         raise ValueError("OFF region empty in local coords; cannot estimate background.")
 
@@ -474,8 +481,8 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                          outfile_base="aitoff",
                          verbose: bool = True):
 
-    lon_local = (az_array + math.pi) % (2*math.pi) - math.pi
-    lat_local = np.pi/2 - zen_array
+    lon_local = (az_array + math.pi) % (2 * math.pi) - math.pi
+    lat_local = np.pi / 2 - zen_array
 
     gal_lon = np.array([c[0] for c in gal_coords])
     gal_lat = np.array([c[1] for c in gal_coords])
@@ -487,17 +494,22 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         "zen_rad": zen_array.astype(float)
     })
 
-    fig_all, ax_all = plt.subplots(figsize=(10,5), subplot_kw={'projection':'aitoff'})
-    ax_all.set_title("Reconstructed events (Aitoff projection, LOCAL az/alt)")
+    fig_all, ax_all = plt.subplots(figsize=(10, 5), subplot_kw={'projection': 'aitoff'})
+    ax_all.set_title("Local coord. (az/alt)")
     ax_all.grid(True)
 
-    sc_main = ax_all.scatter(lon_local, lat_local, s=8, alpha=0.7, marker='o', label="Background")
+    # All non-source events use the same blue marker
+    sc_main = ax_all.scatter(
+        lon_local, lat_local,
+        s=8, alpha=0.7, marker='o', color='blue',
+        label="Background"
+    )
 
     cursor = mplcursors.cursor(sc_main, hover=True)
     @cursor.connect("add")
     def on_hover(sel):
         i = sel.index
-        az_deg = math.degrees((az_array[i] + 2*math.pi) % (2*math.pi))
+        az_deg = math.degrees((az_array[i] + 2 * math.pi) % (2 * math.pi))
         alt_deg = math.degrees(lat_local[i])
         sel.annotation.set_text(
             f"Local az={az_deg:.2f}°\nLocal alt={alt_deg:.2f}°\n"
@@ -508,21 +520,28 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     if extra_smeared:
         extra_az = np.array([c[0] for c in extra_smeared])
         extra_zen = np.array([c[1] for c in extra_smeared])
-        extra_lon_local = (extra_az + math.pi) % (2*math.pi) - math.pi
-        extra_lat_local = np.pi/2 - extra_zen
-        ax_all.scatter(extra_lon_local, extra_lat_local, s=15, color='green',
-                       alpha=0.9, marker='o', label="Cosmic neutrino")
+        extra_lon_local = (extra_az + math.pi) % (2 * math.pi) - math.pi
+        extra_lat_local = np.pi / 2 - extra_zen
+        ax_all.scatter(
+            extra_lon_local, extra_lat_local,
+            s=15, color='blue', alpha=0.9, marker='o',
+            label="Cosmic neutrino"
+        )
 
     if extra_sources:
         src_az = np.array([c[0] for c in extra_sources])
         src_zen = np.array([c[1] for c in extra_sources])
-        src_lon_local = (src_az + math.pi) % (2*math.pi) - math.pi
-        src_lat_local = np.pi/2 - src_zen
-        ax_all.scatter(src_lon_local, src_lat_local, s=120, color='red', alpha=1.0,
-                       marker='*', edgecolor='black', linewidths=0.5,
-                       label="Sources")
+        src_lon_local = (src_az + math.pi) % (2 * math.pi) - math.pi
+        src_lat_local = np.pi / 2 - src_zen
+        ax_all.scatter(
+            src_lon_local, src_lat_local,
+            s=120, color='red', alpha=1.0,
+            marker='*', edgecolor='black', linewidths=0.5,
+            label="Candidate sources"
+        )
 
-    ax_all.legend(loc='upper left', bbox_to_anchor=(-0.05, 1))
+    # Move legend to the other side
+    ax_all.legend(loc='upper right', bbox_to_anchor=(1.05, 1))
     plt.savefig(outfile_base + "_aitoff.png", dpi=300, bbox_inches='tight')
 
     fig_zoom, axes_zoom = plt.subplots(2, 2, figsize=(18, 12))
@@ -562,8 +581,10 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             N_events = len(ra_box)
 
             if N_events > 0:
-                dists = np.array([angular_separation_deg(ra_box[j], dec_box[j], ra_src_deg, dec_src_deg)
-                                  for j in range(N_events)])
+                dists = np.array([
+                    angular_separation_deg(ra_box[j], dec_box[j], ra_src_deg, dec_src_deg)
+                    for j in range(N_events)
+                ])
                 N_core = int(np.sum(dists <= r_core_deg))
             else:
                 dists = np.array([])
@@ -581,8 +602,11 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
             n_b_expected = background_density * area_box
 
-            ax.scatter(ra_box, dec_box, s=10, alpha=0.6, color='gray',
-                       label="Background", zorder=2)
+            ax.scatter(
+                ra_box, dec_box,
+                s=10, alpha=0.6, color='blue',
+                label="Background", zorder=2
+            )
 
             if extra_smeared:
                 ra_sm = np.degrees([c[2] for c in extra_smeared])
@@ -590,9 +614,11 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                 delta_sm = ((ra_sm - ra_src_deg + 180.0) % 360.0) - 180.0
                 mask_sm = (np.abs(delta_sm) <= 5.0) & (np.abs(dec_sm - dec_src_deg) <= 5.0)
 
-                ax.scatter(ra_sm[mask_sm], dec_sm[mask_sm], s=30,
-                           color='green', alpha=0.9,
-                           label="Cosmic neutrino", zorder=3)
+                ax.scatter(
+                    ra_sm[mask_sm], dec_sm[mask_sm],
+                    s=30, color='blue', alpha=0.9,
+                    label="Cosmic neutrino", zorder=3
+                )
 
             if N_events > 0:
                 S_vals = np.zeros(N_events, dtype=float)
@@ -602,12 +628,16 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             else:
                 S_vals = np.zeros(0, dtype=float)
 
-            circle_small = Circle((ra_src_deg, dec_src_deg), 0.1,
-                                  fill=False, edgecolor='red',
-                                  linewidth=1.5, zorder=1)
-            circle_large = Circle((ra_src_deg, dec_src_deg), 0.3,
-                                  fill=False, edgecolor='black',
-                                  linewidth=1.5, zorder=1)
+            circle_small = Circle(
+                (ra_src_deg, dec_src_deg), 0.1,
+                fill=False, edgecolor='red',
+                linewidth=1.5, zorder=1
+            )
+            circle_large = Circle(
+                (ra_src_deg, dec_src_deg), 0.3,
+                fill=False, edgecolor='black',
+                linewidth=1.5, zorder=1
+            )
             ax.add_patch(circle_small)
             ax.add_patch(circle_large)
 
@@ -618,7 +648,8 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             n_b_fixed = n_b_expected
 
             n_s_best, logL_best, logL_null = maximize_extended_likelihood_fixed_background(
-                S_vals, B_val, n_b_fixed, N_events)
+                S_vals, B_val, n_b_fixed, N_events
+            )
 
             TS = max(0.0, 2.0 * (logL_best - logL_null))
             significance_ml = math.sqrt(TS) if TS > 0 else 0.0
@@ -632,10 +663,14 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                 verbose=verbose
             )
 
-            legend = ax.legend(loc="lower right", bbox_to_anchor=(0.98, 0.02),
-                               fontsize=10, frameon=True)
-            legend.set_title(f"Z_ML = {significance_ml:.2f}σ\nZ_ON/OFF = {significance_onoff:.2f}σ",
-                             prop={'size': 10})
+            legend = ax.legend(
+                loc="lower right", bbox_to_anchor=(0.98, 0.02),
+                fontsize=10, frameon=True
+            )
+            legend.set_title(
+                f"Z_ML = {significance_ml:.2f}σ\nZ_ON/OFF = {significance_onoff:.2f}σ",
+                prop={'size': 10}
+            )
             legend.get_frame().set_alpha(0.85)
             legend.get_frame().set_facecolor("white")
 
@@ -649,8 +684,10 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             )
 
             if verbose:
-                print(f"{src_names[i]}: N_box={N_events}, n_b_exp={n_b_expected:.2f}, "
-                      f"n_s={n_s_best:.2f}, Z_ML={significance_ml:.3f}σ, Z_ON/OFF={significance_onoff:.3f}σ")
+                print(
+                    f"{src_names[i]}: N_box={N_events}, n_b_exp={n_b_expected:.2f}, "
+                    f"n_s={n_s_best:.2f}, Z_ML={significance_ml:.3f}σ, Z_ON/OFF={significance_onoff:.3f}σ"
+                )
 
     plt.tight_layout()
 
