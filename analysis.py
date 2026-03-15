@@ -221,7 +221,7 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
     if e_theta_norm == 0 or e_phi_norm == 0:
         tmp = np.array([1.0, 0.0, 0.0])
         if abs(np.dot(tmp, v0)) > 0.9:
-            tmp = np.array([0.0,1.0,0.0])
+            tmp = np.array([0.0, 1.0, 0.0])
         e_theta = np.cross(v0, tmp)
         e_theta /= np.linalg.norm(e_theta)
         e_phi = np.cross(e_theta, v0)
@@ -253,7 +253,7 @@ def gaussian_smear_tangent(ra, dec, sigma_rad, rng=None):
     z = math.sin(dec)
     v = np.array([x, y, z])
 
-    tmp = np.array([1.0,0.0,0.0]) if abs(v[0]) < 0.9 else np.array([0.0,1.0,0.0])
+    tmp = np.array([1.0, 0.0, 0.0]) if abs(v[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
     u_vec = np.cross(v, tmp)
     u_vec /= np.linalg.norm(u_vec)
     w_vec = np.cross(v, u_vec)
@@ -499,6 +499,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
     event_marker_size_aitoff = 8
     event_marker_size_zoom = 10
+    default_blue = plt.rcParams['axes.prop_cycle'].by_key()['color'][0]
 
     fig_all, ax_all = plt.subplots(figsize=(10, 5), subplot_kw={'projection': 'aitoff'})
     ax_all.set_title("Local coord. (az/alt)")
@@ -531,6 +532,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         ax_all.scatter(
             extra_lon_local, extra_lat_local,
             s=event_marker_size_aitoff, alpha=0.9, marker='o',
+            color=default_blue,
             label="Cosmic neutrinos"
         )
 
@@ -627,6 +629,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             ax.scatter(
                 ra_box, dec_box,
                 s=event_marker_size_zoom, alpha=0.6,
+                color=default_blue,
                 label="Background", zorder=2
             )
 
@@ -639,15 +642,9 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                 ax.scatter(
                     ra_sm[mask_sm], dec_sm[mask_sm],
                     s=event_marker_size_zoom, alpha=0.9,
+                    color=default_blue,
                     label="Cosmic neutrinos", zorder=3
                 )
-
-            ax.scatter(
-                [ra_src_deg], [dec_src_deg],
-                s=120, color='red', alpha=1.0,
-                marker='*', edgecolor='black', linewidths=0.5,
-                label="Candidate sources", zorder=4
-            )
 
             if N_events > 0:
                 S_vals = np.zeros(N_events, dtype=float)
@@ -698,12 +695,10 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                 if l == "Background" or l == "Cosmic neutrinos":
                     if "Events" not in legend_map:
                         legend_map["Events"] = h
-                elif l == "Candidate sources":
-                    legend_map["Candidate sources"] = h
 
             legend = ax.legend(
-                [legend_map[k] for k in ["Candidate sources", "Events"] if k in legend_map],
-                [k for k in ["Candidate sources", "Events"] if k in legend_map],
+                [legend_map[k] for k in ["Events"] if k in legend_map],
+                [k for k in ["Events"] if k in legend_map],
                 loc="lower right",
                 bbox_to_anchor=(0.98, 0.02),
                 fontsize=10,
