@@ -281,9 +281,9 @@ def local_horizontal_to_equatorial_vector(az, zen, lat_rad):
 
     rot_angle = math.radians(90.0) - lat_rad
     Rx = np.array([
-        [1,0,0],
-        [0,math.cos(rot_angle),-math.sin(rot_angle)],
-        [0,math.sin(rot_angle), math.cos(rot_angle)]
+        [1, 0, 0],
+        [0, math.cos(rot_angle), -math.sin(rot_angle)],
+        [0, math.sin(rot_angle),  math.cos(rot_angle)]
     ])
     v_eq = Rx @ v_loc
     v_eq /= np.linalg.norm(v_eq)
@@ -500,6 +500,8 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     event_marker_size_aitoff = 8
     event_marker_size_zoom = 10
     default_blue = plt.rcParams['axes.prop_cycle'].by_key()['color'][0]
+    source_letters = ["A", "B", "C", "D"]
+    src_names = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
 
     fig_all, ax_all = plt.subplots(figsize=(10, 5), subplot_kw={'projection': 'aitoff'})
     ax_all.set_title("Local coord. (az/alt)")
@@ -541,12 +543,22 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         src_zen = np.array([c[1] for c in extra_sources])
         src_lon_local = (src_az + math.pi) % (2 * math.pi) - math.pi
         src_lat_local = np.pi / 2 - src_zen
+
         ax_all.scatter(
             src_lon_local, src_lat_local,
             s=120, color='red', alpha=1.0,
             marker='*', edgecolor='black', linewidths=0.5,
             label="Candidate sources"
         )
+
+        for i, (x, y) in enumerate(zip(src_lon_local, src_lat_local)):
+            ax_all.text(
+                x + 0.06, y + 0.03, source_letters[i],
+                fontsize=14, fontweight='bold',
+                color='black', ha='left', va='bottom',
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1.5),
+                zorder=5
+            )
 
     handles_all, labels_all = ax_all.get_legend_handles_labels()
     legend_map_all = {}
@@ -578,7 +590,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
         sigma_deg = 0.1
         area_box_deg2 = 10.0 * 10.0
-        src_names = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
 
         r_core_deg = 0.5
         area_core = math.pi * (r_core_deg ** 2)
@@ -588,7 +599,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
         for i, (gal_lon_src, gal_lat_src) in enumerate([(c[2], c[3]) for c in extra_sources]):
             ax = axes_zoom[i]
-            ax.set_title(src_names[i], fontsize=14)
+            ax.set_title(f'Source {source_letters[i]}: {src_names[i]}', fontsize=14)
             ax.set_xlabel("Galactic Lon (deg)", fontsize=12)
             ax.set_ylabel("Galactic Lat (deg)", fontsize=12)
             ax.grid(alpha=0.25)
