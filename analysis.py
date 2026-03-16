@@ -188,7 +188,7 @@ def apply_systematics(radius, calseed, day_fraction):
     rng = random.Random(local_seed)
     alpha_scale = max(0.1, min(10.0, rng.gauss(1.0, 0.10)))
     alpha = max(0.0, min(math.pi, radius * alpha_scale))
-    phi = rng.uniform(0, 2*math.pi)
+    phi = rng.uniform(0, 2 * math.pi)
     return alpha, phi
 
 def deterministic_day_fraction(ra, dec, calseed):
@@ -211,9 +211,11 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
     z0 = sin_dec
     v0 = np.array([x0, y0, z0])
 
-    e_theta = np.array([-sin_dec * math.cos(ra),
-                        -sin_dec * math.sin(ra),
-                         cos_dec])
+    e_theta = np.array([
+        -sin_dec * math.cos(ra),
+        -sin_dec * math.sin(ra),
+         cos_dec
+    ])
     e_phi = np.array([-math.sin(ra), math.cos(ra), 0.0])
 
     e_theta_norm = np.linalg.norm(e_theta)
@@ -228,7 +230,7 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
         e_phi /= np.linalg.norm(e_phi)
     else:
         e_theta /= e_theta_norm
-        e_phi   /= e_phi_norm
+        e_phi /= e_phi_norm
 
     disp = math.sin(alpha) * (math.cos(phi) * e_theta + math.sin(phi) * e_phi)
     new_vec = math.cos(alpha) * v0 + disp
@@ -236,7 +238,7 @@ def scramble_point(ra, dec, radius, calseed, apply_systematics):
 
     x, y, z = new_vec
     new_dec = math.asin(np.clip(z, -1.0, 1.0))
-    new_ra  = math.atan2(y, x)
+    new_ra = math.atan2(y, x)
     if new_ra > math.pi:
         new_ra -= 2 * math.pi
     elif new_ra < -math.pi:
@@ -263,7 +265,7 @@ def gaussian_smear_tangent(ra, dec, sigma_rad, rng=None):
     else:
         dx, dy = rng.normal(0.0, sigma_rad, 2)
 
-    new_vec = v + dx*u_vec + dy*w_vec
+    new_vec = v + dx * u_vec + dy * w_vec
     new_vec /= np.linalg.norm(new_vec)
 
     new_ra = math.atan2(new_vec[1], new_vec[0])
@@ -457,17 +459,17 @@ def poisson_significance(events_df_local: pd.DataFrame,
     cos_g = np.clip(cos_g, -1.0, 1.0)
     df["angular_distance"] = np.arccos(cos_g)
 
-    on_events_df  = df[df["angular_distance"] <= roi_angle]
+    on_events_df = df[df["angular_distance"] <= roi_angle]
     off_events_df = df[df["angular_distance"] > roi_angle]
     if off_events_df.empty:
         raise ValueError("OFF region empty in local coords; cannot estimate background.")
 
-    n_ON  = len(on_events_df)
+    n_ON = len(on_events_df)
     n_OFF = len(off_events_df)
 
     mu_bkg = omega_ON * n_OFF / omega_OFF
     pvalue = poisson_pvalue(n_ON, mu_bkg)
-    sigma  = pvalue_to_sigma(pvalue, one_sided=True) if (0.0 < pvalue < 1.0) else 0.0
+    sigma = pvalue_to_sigma(pvalue, one_sided=True) if (0.0 < pvalue < 1.0) else 0.0
 
     if verbose:
         if source_name is None:
@@ -493,14 +495,18 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     gal_lat_deg = np.degrees(gal_lat)
 
     events_df_local = pd.DataFrame({
-        "az_rad":  az_array.astype(float),
+        "az_rad": az_array.astype(float),
         "zen_rad": zen_array.astype(float)
     })
 
     event_marker_size_aitoff = 8
-    event_marker_size_zoom = 1
+    event_marker_size_zoom = 10
+    default_blue = plt.rcParams['axes.prop_cycle'].by_key()['color'][0]
     source_letters = ["A", "B", "C", "D"]
     src_names = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
+
+    # Use identical styling for all event-like markers in zoom plots
+    zoom_event_alpha = 0.8
 
     fig_all, ax_all = plt.subplots(figsize=(10, 5), subplot_kw={'projection': 'aitoff'})
     ax_all.set_title("Local coord. (az/alt)")
@@ -533,6 +539,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         ax_all.scatter(
             extra_lon_local, extra_lat_local,
             s=event_marker_size_aitoff, alpha=0.9, marker='o',
+            color=default_blue,
             label="Cosmic neutrinos"
         )
 
@@ -637,8 +644,12 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
             ax.scatter(
                 ra_box, dec_box,
-                s=event_marker_size_zoom, alpha=0.6,
-                label="Background", zorder=2
+                s=event_marker_size_zoom,
+                alpha=zoom_event_alpha,
+                color=default_blue,
+                marker='o',
+                label="Background",
+                zorder=2
             )
 
             if extra_smeared:
@@ -649,8 +660,12 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
                 ax.scatter(
                     ra_sm[mask_sm], dec_sm[mask_sm],
-                    s=event_marker_size_zoom, alpha=0.9,
-                    label="Cosmic neutrinos", zorder=3
+                    s=event_marker_size_zoom,
+                    alpha=zoom_event_alpha,
+                    color=default_blue,
+                    marker='o',
+                    label="Cosmic neutrinos",
+                    zorder=3
                 )
 
             if N_events > 0:
