@@ -498,8 +498,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     })
 
     event_marker_size_aitoff = 8
-    event_marker_size_zoom = 10
-    default_blue = plt.rcParams['axes.prop_cycle'].by_key()['color'][0]
+    event_marker_size_zoom = 1
     source_letters = ["A", "B", "C", "D"]
     src_names = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
 
@@ -534,7 +533,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         ax_all.scatter(
             extra_lon_local, extra_lat_local,
             s=event_marker_size_aitoff, alpha=0.9, marker='o',
-            color=default_blue,
             label="Cosmic neutrinos"
         )
 
@@ -640,7 +638,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
             ax.scatter(
                 ra_box, dec_box,
                 s=event_marker_size_zoom, alpha=0.6,
-                color=default_blue,
                 label="Background", zorder=2
             )
 
@@ -653,7 +650,6 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
                 ax.scatter(
                     ra_sm[mask_sm], dec_sm[mask_sm],
                     s=event_marker_size_zoom, alpha=0.9,
-                    color=default_blue,
                     label="Cosmic neutrinos", zorder=3
                 )
 
