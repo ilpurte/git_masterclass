@@ -502,11 +502,28 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
     event_marker_size_aitoff = 8
     event_marker_size_zoom = 10
     default_blue = plt.rcParams['axes.prop_cycle'].by_key()['color'][0]
-    source_letters = ["A", "B", "C", "D"]
-    src_names = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
-
-    # Use identical styling for all event-like markers in zoom plots
     zoom_event_alpha = 0.8
+
+    # Original source order matches extra_points_hardcoded
+    src_names_original = ["PKS 0239+108", "TXS 0506+056", "Vela X", "Markarian 421"]
+
+    # Requested labeling:
+    # A = Markarian 421
+    # B = PKS 0239+108
+    # C = Vela X
+    # D = TXS 0506+056
+    source_letter_by_name = {
+        "Markarian 421": "A",
+        "PKS 0239+108": "B",
+        "Vela X": "C",
+        "TXS 0506+056": "D",
+    }
+
+    # Requested zoom order:
+    # A --> B
+    # C --> D
+    zoom_order_names = ["Markarian 421", "PKS 0239+108", "Vela X", "TXS 0506+056"]
+    name_to_original_index = {name: i for i, name in enumerate(src_names_original)}
 
     fig_all, ax_all = plt.subplots(figsize=(10, 5), subplot_kw={'projection': 'aitoff'})
     ax_all.set_title("Local coord. (az/alt)")
@@ -557,8 +574,10 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         )
 
         for i, (x, y) in enumerate(zip(src_lon_local, src_lat_local)):
+            src_name = src_names_original[i]
+            src_letter = source_letter_by_name[src_name]
             ax_all.text(
-                x + 0.06, y + 0.03, source_letters[i],
+                x + 0.06, y + 0.03, src_letter,
                 fontsize=14, fontweight='bold',
                 color='black', ha='left', va='bottom',
                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1.5),
@@ -602,9 +621,13 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
         roi_onoff_deg = 0.3
         roi_onoff_rad = math.radians(roi_onoff_deg)
 
-        for i, (gal_lon_src, gal_lat_src) in enumerate([(c[2], c[3]) for c in extra_sources]):
-            ax = axes_zoom[i]
-            ax.set_title(f'Source {source_letters[i]}: {src_names[i]}', fontsize=14)
+        for panel_idx, src_name in enumerate(zoom_order_names):
+            src_idx = name_to_original_index[src_name]
+            src_letter = source_letter_by_name[src_name]
+            gal_lon_src, gal_lat_src = extra_sources[src_idx][2], extra_sources[src_idx][3]
+
+            ax = axes_zoom[panel_idx]
+            ax.set_title(f"Source {src_letter}: {src_name}", fontsize=14)
             ax.set_xlabel("Galactic Lon (deg)", fontsize=12)
             ax.set_ylabel("Galactic Lat (deg)", fontsize=12)
             ax.grid(alpha=0.25)
@@ -704,10 +727,10 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
             _, _, significance_onoff = poisson_significance(
                 events_df_local,
-                source_az=src_az[i],
-                source_zen=src_zen[i],
+                source_az=extra_sources[src_idx][0],
+                source_zen=extra_sources[src_idx][1],
                 roi_angle=roi_onoff_rad,
-                source_name=src_names[i],
+                source_name=src_name,
                 verbose=verbose
             )
 
@@ -744,7 +767,7 @@ def plot_aitoff_and_zoom(az_array, zen_array, gal_coords,
 
             if verbose:
                 print(
-                    f"{src_names[i]}: N_box={N_events}, n_b_exp={n_b_expected:.2f}, "
+                    f"{src_name}: N_box={N_events}, n_b_exp={n_b_expected:.2f}, "
                     f"n_s={n_s_best:.2f}, Z_ML={significance_ml:.3f}σ, Z_ON/OFF={significance_onoff:.3f}σ"
                 )
 
